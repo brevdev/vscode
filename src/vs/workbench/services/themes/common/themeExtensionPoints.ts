@@ -134,6 +134,7 @@ export class ThemeRegistry<T extends IThemeData> {
 
 	private initialize() {
 		this.themesExtPoint.setHandler((extensions, delta) => {
+			console.log('>>>>', extensions.length);
 			const previousIds: { [key: string]: T } = {};
 
 			const added: T[] = [];

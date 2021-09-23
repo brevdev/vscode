@@ -93,6 +93,9 @@
 	"typescript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets": false,
 	"javascript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets": false,
 
+	// @coder Quiets error when using templating brackets in HTML files.
+	"html.validate.styles": false,
+
 	"typescript.tsc.autoDetect": "off",
 	"notebook.experimental.useMarkdownRenderer": true,
 	"testing.autoRun.mode": "rerun",

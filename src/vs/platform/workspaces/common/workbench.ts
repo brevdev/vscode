@@ -69,7 +69,7 @@ interface ISettingsSyncOptionsSerialized {
  * @coder Standard workbench constructor options with additional server paths.
  * @remark See `IWorkbenchConstructionOptions` for the client-side.
  */
-export interface IWorkbenchConfigurationSerialized extends IWebWorkspaceProvider, IWebWorkspace {
+export interface IWorkbenchConfigurationSerialized extends IWebWorkspace {
 	readonly remoteAuthority: string;
 
 	readonly nlsConfiguration: NLSConfiguration | InternalNLSConfiguration;

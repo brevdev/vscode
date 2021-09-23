@@ -61,7 +61,23 @@ import { FileProviderChannel } from 'vs/server/ipc/fileProviderIpc';
 import { ExtensionEnvironmentChannel } from 'vs/server/ipc/extensionEnvironmentIpc';
 import { TerminalProviderChannel } from 'vs/server/ipc/terminalProviderIpc';
 import { IReconnectConstants, LocalReconnectConstants, TerminalSettingId } from 'vs/platform/terminal/common/terminal';
+import { IThemeService, ThemeService } from 'vs/platform/theme/node/themeService';
 import { LogsDataCleaner } from 'vs/server/logsDataCleaner';
+// eslint-disable-next-line code-import-patterns
+import { StateMainService } from 'vs/platform/state/electron-main/stateMainService';
+// eslint-disable-next-line code-import-patterns
+import { IStateMainService } from 'vs/platform/state/electron-main/state';
+// eslint-disable-next-line code-import-patterns
+import { IEnvironmentMainService } from 'vs/platform/environment/electron-main/environmentMainService';
+import { ThemeConfiguration } from 'vs/workbench/services/themes/common/themeConfiguration';
+import { ColorThemeData } from 'vs/workbench/services/themes/common/colorThemeData';
+import { editorBackground } from 'vs/platform/theme/common/colorRegistry';
+import { registerColorThemeExtensionPoint, ThemeRegistry } from 'vs/workbench/services/themes/common/themeExtensionPoints';
+import { IThemeExtensionPoint } from 'vs/workbench/services/themes/common/workbenchThemeService';
+import { ExtensionMessageCollector, IExtensionPointUser } from 'vs/workbench/services/extensions/common/extensionsRegistry';
+import { ExtensionResourceLoaderService } from 'vs/workbench/services/extensionResourceLoader/electron-sandbox/extensionResourceLoaderService';
+import { IExtensionResourceLoaderService } from 'vs/workbench/services/extensionResourceLoader/common/extensionResourceLoader';
+import { INLSExtensionScannerService, NLSExtensionScannerService } from 'vs/server/services/nlsExtensionScannerService';
 
 interface IServerProcessMainStartupOptions {
 	listenWhenReady?: boolean;
@@ -90,14 +106,20 @@ export class ServerProcessMain extends Disposable implements IServerProcessMain 
 
 	public async startup({ listenWhenReady = true }: IServerProcessMainStartupOptions = {}): Promise<NetServer> {
 		// Services
-		const [instantiationService, environmentServerService, logService, bufferLogService] = await this.createServices();
+		const [
+			instantiationService,
+			environmentServerService,
+			logService,
+			bufferLogService,
+			themeService,
+		] = await this.createServices();
 
 		// Net Server
 		const netServer = createNetServer();
 
 		const webSocketHandler = new WebSocketHandler(netServer, environmentServerService, logService);
 		webSocketHandler.listen();
-		const webRequestHandler = new WebRequestHandler(netServer, environmentServerService, logService);
+		const webRequestHandler = new WebRequestHandler(netServer, environmentServerService, logService, themeService);
 		webRequestHandler.listen();
 
 		// IPC Server
@@ -132,7 +154,7 @@ export class ServerProcessMain extends Disposable implements IServerProcessMain 
 	// References:
 	// ../../electron-browser/sharedProcess/sharedProcessMain.ts#L148
 	// ../../../code/electron-main/app.ts
-	public async createServices(): Promise<[IInstantiationService, IEnvironmentServerService, ILogService, BufferLogService]> {
+	public async createServices(): Promise<[IInstantiationService, IEnvironmentServerService, ILogService, BufferLogService, IThemeService]> {
 		const services = new ServiceCollection();
 
 		// Product
@@ -175,22 +197,70 @@ export class ServerProcessMain extends Disposable implements IServerProcessMain 
 		services.set(ILogService, logService);
 		services.set(ILoggerService, loggerService);
 
+		// Configuration
 		const configurationService = new ConfigurationService(environmentServerService.settingsResource, fileService);
 		await configurationService.initialize();
 		services.set(IConfigurationService, configurationService);
 
+		// Request
 		services.set(IRequestService, new SyncDescriptor(RequestService));
+
+		// File Service can now be set...
 		services.set(IFileService, fileService);
 
 		await configurationService.initialize();
 		services.set(IConfigurationService, configurationService);
 
-		const machineId = await this.resolveMachineId();
+
+		// State
+		const stateMainService = new StateMainService(environmentServerService as unknown as IEnvironmentMainService, logService, fileService);
+		services.set(IStateMainService, stateMainService);
+
+		// const lifecycleMainService = new LifecycleMainService(logService, stateMainService);
+
+		// Theme
+		// const storageService = new NativeStorageService(undefined,undefined, environmentServerService);
+		// const globalStorage = new GlobalStorageMain({}, logService, environmentServerService);
+		// await globalStorage.init();
+
+		// const colorTheme = globalStorage.get(ColorThemeData.STORAGE_KEY);
+
+		// console.trace('>>.', colorTheme);
+		// const fooTheme = ColorThemeData.fromStorageData(globalStorage as any);
+		// const fooTheme = ColorThemeData.createUnloadedThemeForThemeType(ColorScheme.LIGHT);
+		// const fooTheme = ColorThemeData.fromExtensionTheme(colorThemesExtPoint, )
+
+
+
+		// const extensions = await extensionManagementService.getInstalled();
+		// for (let ext of extensions) {
+		// 	console.log(ext.identifier, ext.isBuiltin, ext.manifest.extensionKind);
+		// }
+
+
+		// 		const fooTheme = ColorThemeData.fromStorageData(configurationService.getValue)
+
+
+
+
+
+		// const fooTheme = ColorThemeData.createUnloadedTheme('foo')
+		const themeService = new ThemeService(stateMainService);
+		// const themeConfiguration = new ThemeConfiguration(configurationService);
+
+		services.set(IThemeService, themeService);
+
+		// configurationService.onDidChangeConfiguration(e => {
+		// 	console.trace(e.change.keys);
+		// })
+
 
 		const instantiationService = new InstantiationService(services);
 
 		// Telemetry
 		if (!environmentServerService.isExtensionDevelopment && !environmentServerService.disableTelemetry && productService.enableTelemetry) {
+			const machineId = await this.resolveMachineId();
+
 			const appender = combinedAppender(new AppInsightsAppender('code-server', null, () => new TelemetryClient()), new TelemetryLogAppender(loggerService, environmentServerService));
 
 			const commonProperties = resolveCommonProperties(fileService, release(), hostname(), process.arch, environmentServerService.commit, product.version, machineId, undefined, environmentServerService.installSourcePath, 'code-server');
@@ -202,21 +272,33 @@ export class ServerProcessMain extends Disposable implements IServerProcessMain 
 			services.set(ITelemetryService, NullTelemetryService);
 		}
 
+		services.set(IExtensionResourceLoaderService, new SyncDescriptor(ExtensionResourceLoaderService));
+
 		services.set(IExtensionManagementService, new SyncDescriptor(ExtensionManagementService));
 		services.set(IExtensionGalleryService, new SyncDescriptor(ExtensionGalleryService));
+		services.set(INLSExtensionScannerService, new SyncDescriptor(NLSExtensionScannerService));
+
 		services.set(ILocalizationsService, new SyncDescriptor(LocalizationsService));
 
-		return [instantiationService, environmentServerService, logService, bufferLogService];
+		return [
+			instantiationService,
+			environmentServerService,
+			logService,
+			bufferLogService,
+			themeService,
+		];
 	}
 
 	private initChannels(instantiationService: IInstantiationService, ipcServer: IPCServer<RemoteAgentConnectionContext>): Promise<void> {
 		return new Promise(resolve => {
-			instantiationService.invokeFunction(accessor => {
+			instantiationService.invokeFunction(async accessor => {
+				const extensionResourceLoaderService = accessor.get(IExtensionResourceLoaderService)
 				const configurationService = accessor.get(IConfigurationService);
 				const logService = accessor.get(ILogService);
 				const telemetryService = accessor.get(ITelemetryService);
 				const extensionManagementService = accessor.get(IExtensionManagementService);
 				const environmentServerService = accessor.get(IEnvironmentServerService);
+				const nlsExtensionScannerService = accessor.get(INLSExtensionScannerService);
 				const localizationsService = accessor.get(ILocalizationsService);
 				const requestService = accessor.get(IRequestService);
 
@@ -224,7 +306,36 @@ export class ServerProcessMain extends Disposable implements IServerProcessMain 
 				ipcServer.registerChannel(ExtensionHostDebugBroadcastChannel.ChannelName, new ExtensionHostDebugBroadcastChannel());
 
 				ipcServer.registerChannel('extensions', new ExtensionManagementChannel(extensionManagementService, context => createServerURITransformer(context.remoteAuthority)));
-				ipcServer.registerChannel('remoteextensionsenvironment', new ExtensionEnvironmentChannel(environmentServerService, logService, telemetryService, ''));
+				const settings = new ThemeConfiguration(configurationService);
+				const colorThemesExtPoint = registerColorThemeExtensionPoint();
+				const availableExtensions = await nlsExtensionScannerService.scanExtensions();
+
+				const users: IExtensionPointUser<IThemeExtensionPoint[]>[] = [];
+
+				for (const desc of availableExtensions) {
+					if (!desc.contributes || !Object.hasOwnProperty.call(desc.contributes, colorThemesExtPoint.name)) {
+						continue;
+					}
+					console.log(`pushing ${desc.name}`);
+					users.push({
+						description: desc,
+						value: desc.contributes[colorThemesExtPoint.name as keyof typeof desc.contributes] as IThemeExtensionPoint[],
+						collector: new ExtensionMessageCollector(() => { }, desc, colorThemesExtPoint.name)
+					});
+				}
+				colorThemesExtPoint.acceptUsers(users);
+				const colorThemeRegistry = new ThemeRegistry(colorThemesExtPoint, ColorThemeData.fromExtensionTheme);
+				const fooTheme = colorThemeRegistry.findThemeBySettingsId(settings.colorTheme);
+
+				if (fooTheme) {
+					await fooTheme.ensureLoaded(extensionResourceLoaderService);
+					const backgroundColor = fooTheme.getColor(editorBackground, false);
+					console.trace('>>>', fooTheme.settingsId, backgroundColor?.toString());
+				} else {
+					console.trace('!!! >>> no theme!');
+				}
+
+				ipcServer.registerChannel('remoteextensionsenvironment', new ExtensionEnvironmentChannel(environmentServerService, nlsExtensionScannerService, telemetryService, ''));
 				ipcServer.registerChannel('request', new RequestChannel(requestService));
 				ipcServer.registerChannel('localizations', <IServerChannel<any>>ProxyChannel.fromService(localizationsService));
 				ipcServer.registerChannel(REMOTE_FILE_SYSTEM_CHANNEL_NAME, new FileProviderChannel(environmentServerService, logService));

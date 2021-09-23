@@ -65,7 +65,8 @@ import { IWorkspaceTrustEnablementService, IWorkspaceTrustManagementService } fr
 import { HTMLFileSystemProvider } from 'vs/platform/files/browser/htmlFileSystemProvider';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { safeStringify } from 'vs/base/common/objects';
-import { initialize } from './client';
+import { CodeServerClientAdditions } from './client';
+import { isWeb } from 'vs/base/common/platform';
 
 class BrowserMain extends Disposable {
 
@@ -98,8 +99,17 @@ class BrowserMain extends Disposable {
 		// Startup
 		const instantiationService = workbench.startup();
 
-		/** @coder Initialize our own client-side additions. */
-		await initialize(services.serviceCollection, this.configuration);
+
+		if (isWeb) {
+			/** @coder Initialize our own client-side additions. */
+			if (!this.configuration.productConfiguration) {
+				throw new Error('`productConfiguration` not present in workbench config');
+			}
+
+			const codeServerClientAdditions = this._register(instantiationService.createInstance(CodeServerClientAdditions));
+			await codeServerClientAdditions.startup(this.configuration.productConfiguration!);
+		}
+
 
 		// Window
 		this._register(instantiationService.createInstance(BrowserWindow));

@@ -26,7 +26,7 @@ export abstract class AbstractNetRequestHandler<E extends NetEventListener> exte
 	}
 
 	private _handleEvent = (req: http.IncomingMessage, ...args: any[]) => {
-		const parsedUrl = new URL(req.url || '/', `${this.environmentService.protocol}//${req.headers.host}`);
+		const parsedUrl = new URL(req.url || '/', `${this.environmentService.serverUrl.protocol}//${req.headers.host}`);
 
 		Object.assign(req, {
 			parsedUrl,
